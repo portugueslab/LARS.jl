@@ -1,5 +1,5 @@
 # Least angle regression
-# 
+#
 # Copyright 2014 Simon Kornblith <simon@simonster.com> and others
 #
 # The LARS implementation here is heavily derived from scikit-learn.
@@ -81,9 +81,9 @@ immutable LARSPath{T}
     # Intercept values at each knot
     intercept::Vector{T}
 
-    LARSPath(method, standardized, lambda2, steps, lambda, coefs) =
+    LARSPath{T}(method, standardized, lambda2, steps, lambda, coefs) where T =
         new(method, standardized, lambda2, steps, lambda, coefs)
-    LARSPath(method, standardized, lambda2, steps, lambda, coefs, intercept) =
+    LARSPath{T}(method, standardized, lambda2, steps, lambda, coefs, intercept) where T =
         new(method, standardized, lambda2, steps, lambda, coefs, intercept)
 end
 
@@ -124,7 +124,7 @@ function swaprows!(X::DenseMatrix, c1::Int, c2::Int)
     X
 end
 
-@eval function choldelete!{T}(R::StridedView{T}, row::Int)
+@eval function choldelete!{T}(R::SubArray{T}, row::Int)
     inc = stride(R, 2)*sizeof(T)
     p = (row-1)*inc
     for i = row:size(R, 2)-1
