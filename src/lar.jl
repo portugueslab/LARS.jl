@@ -64,27 +64,27 @@ immutable LARSPath{T}
     standardized::Bool
 
     # The value of the elastic net ridge parameter
-    lambda2::Float64
+    λ₂::Float64
 
     # What happened at each step of the LARS procedure
     steps::Vector{LARSStep}
 
-    # The lambda values at each knot of the LARS procedure. The number
-    # of lambdas and coefficient vectors does not necessarily match the
+    # The λ values at each knot of the LARS procedure. The number
+    # of λs and coefficient vectors does not necessarily match the
     # number of steps, since a dropped predictor results in an
     # additional knot
-    lambdas::Vector{T}
+    λs::Vector{T}
 
-    # Coefficient values at each knot. npredictors x nlambdas
+    # Coefficient values at each knot. npredictors x nλs
     coefs::Matrix{T}
 
     # Intercept values at each knot
     intercept::Vector{T}
 
-    LARSPath{T}(method, standardized, lambda2, steps, lambda, coefs) where T =
-        new(method, standardized, lambda2, steps, lambda, coefs)
-    LARSPath{T}(method, standardized, lambda2, steps, lambda, coefs, intercept) where T =
-        new(method, standardized, lambda2, steps, lambda, coefs, intercept)
+    LARSPath{T}(method, standardized, λ₂, steps, λ, coefs) where T =
+        new(method, standardized, λ₂, steps, λ, coefs)
+    LARSPath{T}(method, standardized, λ₂, steps, λ, coefs, intercept) where T =
+        new(method, standardized, λ₂, steps, λ, coefs, intercept)
 end
 
 function Base.show{T}(io::IO, path::LARSPath{T})
@@ -92,14 +92,14 @@ function Base.show{T}(io::IO, path::LARSPath{T})
     !isempty(path.steps) || return
 
     spacing = repeat(" ", 2)
-    steplen = max(iceil(log10(length(path.steps))), 4)
-    lambdalen = maximum([length(repr(lambda)) for lambda in path.lambdas])
-    print(io, ' ', rpad("Step", steplen), spacing, rpad("λ", lambdalen), spacing, "Action")
+    steplen = max(ceil(Int, log10(length(path.steps))), 4)
+    λlen = maximum([length(repr(λ)) for λ in path.λs])
+    print(io, ' ', rpad("Step", steplen), spacing, rpad("λ", λlen), spacing, "Action")
 
     dropped = false
     for i = 1:length(path.steps)
         print(io, '\n', ' ', lpad(repr(i), steplen), spacing,
-              rpad(repr(path.lambdas[i]), lambdalen), spacing)
+              rpad(repr(path.λs[i]), λlen), spacing)
 
         step = path.steps[i]
         if step.added == 0
@@ -138,19 +138,21 @@ end
 end
 
 function standardize!{T}(X::AbstractMatrix{T})
-    Xnorm = [begin
+    Xnorm = [
+        begin
         v = view(X, :, i)
         x = 1/sqrt(dot(v, v))
         ifelse(isfinite(x), x, one(T))
-    end for i = 1:size(X, 2)]
+        end
+    for i = 1:size(X, 2)]
     scale!(X, Xnorm)
     Xnorm
 end
 
 function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
                            intercept::Bool=true, standardize::Bool=true,
-                           lambda2::Float64=0.0, maxiter::Int=typemax(Int),
-                           lambda_min::Float64=0.0, use_gram::Bool=(size(X, 1) > size(X, 2)),
+                           λ₂::Float64=0.0, maxiter::Int=typemax(Int),
+                           λ_min::Float64=0.0, use_gram::Bool=(size(X, 1) > size(X, 2)),
                            verbose::Bool=false)
     # Center and standardize
     if intercept
@@ -173,11 +175,11 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
     coef = zeros(T, nfeatures)
     prev_coef = zeros(T, nfeatures)
     coefs = zeros(T, nfeatures, maxfeatures + 1)
-    lambdas = zeros(T, maxfeatures + 1)
-    lambda = convert(T, Inf)
+    λs = zeros(T, maxfeatures + 1)
+    λ = convert(T, Inf)
 
-    x1 = 1 / (1 + lambda2)
-    x2 = 1 / sqrt(1 + lambda2)
+    x1 = 1 / (1 + λ₂)
+    x2 = 1 / sqrt(1 + λ₂)
 
     niter, nactive = 1, 0
     # We swap columns of X as the algorithm progresses
@@ -221,21 +223,21 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
             end
         end
 
-        prev_lambda = lambda
-        lambda = C
-        lambdas[niter] = lambda
+        prev_λ = λ
+        λ = C
+        λs[niter] = λ
 
-        if lambda <= lambda_min # early stopping
-            if lambda != lambda_min && niter > 1
+        if λ <= λ_min # early stopping
+            if λ != λ_min && niter > 1
                 # interpolation factor 0 <= ss < 1
-                # In the first iteration, all lambdas are zero, the formula
+                # In the first iteration, all λs are zero, the formula
                 # below would make ss a NaN
-                ss = ((prev_lambda - lambda_min) /
-                      (prev_lambda - lambda))
+                ss = ((prev_λ - λ_min) /
+                      (prev_λ - λ))
                 for i = 1:length(coef)
                     coef[i] = prev_coef[i] + ss * (coef[i] - prev_coef[i])
                 end
-                lambdas[niter] = lambda_min
+                λs[niter] = λ_min
                 coefs[:, niter] = coef
             end
             break
@@ -261,18 +263,20 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
                 swapcols!(X, m, n)
                 newcolX = view(X, :, nactive+1)
                 R[nactive+1, nactive+1] = dot(newcolX, newcolX)
-                Ac_mul_B!(view(R, 1:nactive, nactive+1:nactive+1), view(X, :, 1:nactive), view(X, :, nactive+1:nactive+1))
+                Ac_mul_B!(view(R, 1:nactive, nactive+1:nactive+1),
+                          view(X, :, 1:nactive), view(X, :, nactive+1:nactive+1))
             else
                 swaprows!(Gram, m, n)
                 swapcols!(Gram, m, n)
-                copy!(view(R, 1:nactive+1, nactive+1), view(Gram, 1:nactive+1, nactive+1))
+                copy!(view(R, 1:nactive+1, nactive+1),
+                      view(Gram, 1:nactive+1, nactive+1))
             end
 
-            if lambda2 != 0.0
+            if λ₂ != 0.0
                 for i = 1:nactive
                     R[i, nactive+1] = R[i, nactive+1] * x1
                 end
-                R[nactive+1, nactive+1] = (R[nactive+1, nactive+1] + lambda2) * x1
+                R[nactive+1, nactive+1] = (R[nactive+1, nactive+1] + λ₂) * x1
             end
 
             # Update the cholesky decomposition
@@ -289,7 +293,7 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
                 # The system is becoming too ill-conditioned.
                 # We have degenerate vectors in our active set.
                 # We'll 'drop for good' the last regressor added
-                warn(@sprintf "Regressors in active set degenerate. Dropping a regressor, after %i iterations, i.e. λ=%.3e, with an active set of %i regressors, and the smallest cholesky pivot element being %.3e" niter lambda nactive diag)
+                warn(@sprintf "Regressors in active set degenerate. Dropping a regressor, after %i iterations, i.e. λ=%.3e, with an active set of %i regressors, and the smallest cholesky pivot element being %.3e" niter λ nactive diag)
                 # XXX: need to figure a 'drop for good' way
                 unshift!(Cov, removed_Cov)
                 Cov[1] = Cov[C_idx]
@@ -307,12 +311,12 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
             end
         end
 
-        if method == :lasso && niter > 0 && prev_lambda < lambda
-            # lambda is increasing. This is because the updates of Cov are
+        if method == :lasso && niter > 0 && prev_λ < λ
+            # λ is increasing. This is because the updates of Cov are
             # bringing in too much numerical error that is greater than
             # than the remaining correlation with the
             # regressors. Time to bail out
-            warn(@sprintf "Early stopping the lars path, as the residues are small and the current value of lambda is no longer well controlled. %i iterations, λ=%.3e, previous λ=%.3e, with an active set of %i regressors." niter lambda prev_lambda nactive)
+            warn(@sprintf "Early stopping the lars path, as the residues are small and the current value of λ is no longer well controlled. %i iterations, λ=%.3e, previous λ=%.3e, with an active set of %i regressors." niter λ prev_λ nactive)
             break
         end
 
@@ -393,13 +397,13 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
         niter += 1
 
         if niter > size(coefs, 2)
-            # resize the coefs and lambdas array
+            # resize the coefs and λs array
             addsteps = 2 * max(1, (maxfeatures - nactive))
             coefs_new = zeros(T, size(coefs, 1), niter+addsteps)
             coefs_new[:, 1:size(coefs, 2)] = coefs
             coefs = coefs_new
-            resize!(lambdas, niter+addsteps)
-            lambdas[niter:end] = 0
+            resize!(λs, niter+addsteps)
+            λs[niter:end] = 0
         end
         copy!(prev_coef, coef)
         fill!(coef, zero(eltype(coef)))
@@ -474,13 +478,13 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
     end
 
     coefs = coefs[:, 1:niter]
-    lambdas = lambdas[1:niter]
+    λs = λs[1:niter]
     if standardize
         scale!(Xnorm, coefs)
     end
     if intercept
-        LARSPath{T}(method, standardize, lambda2, steps, lambdas, coefs, μy .- vec(μX * coefs))
+        LARSPath{T}(method, standardize, λ₂, steps, λs, coefs, μy .- vec(μX * coefs))
     else
-        LARSPath{T}(method, standardize, lambda2, steps, lambdas, coefs)
+        LARSPath{T}(method, standardize, λ₂, steps, λs, coefs)
     end
 end
