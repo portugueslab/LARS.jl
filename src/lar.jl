@@ -153,7 +153,8 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
                            intercept::Bool=true, standardize::Bool=true,
                            λ₂::Float64=0.0, maxiter::Int=typemax(Int),
                            λ_min::Float64=0.0, use_gram::Bool=(size(X, 1) > size(X, 2)),
-                           verbose::Bool=false)
+                           verbose::Bool=false,
+                           positive=false)
     # Center and standardize
     if intercept
         μX = mean(X, 1)
@@ -212,13 +213,27 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
             C = 0.0
         else
             C_idx = 1
-            C_ = NaN
-            C = NaN
-            for i = 1:length(Cov)
-                if isnan(C_) || abs(Cov[i]) > C
-                    C_idx = i
-                    C_ = Cov[i]
-                    C = abs(Cov[i])
+
+            if positive
+                C_ = 0
+                C = 0
+                for i in eachindex(Cov)
+                    if Cov[i] > C
+                        C_idx = i
+                        C = Cov[i]
+
+                    end
+                end
+                C_ = C
+            else
+                C_ = NaN
+                C = NaN
+                for i in eachindex(Cov)
+                    if isnan(C_) || (!positive ? abs(Cov[i]) > C : Cov[i] > C)
+                        C_idx = i
+                        C_ = Cov[i]
+                        C = abs(Cov[i])
+                    end
                 end
             end
         end
@@ -252,6 +267,7 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
             #            ( 0   z )    and z = ||x_j||                #
             #                                                        #
             ##########################################################
+
             m, n = nactive+1, C_idx+nactive
 
             removed_Cov = Cov[C_idx]
@@ -302,7 +318,7 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
             end
 
             nactive += 1
-            push!(signactive, sign(C_))
+            push!(signactive, positive ? 1 : sign(C_))
             push!(active, indices[nactive])
             push!(steps, LARSStep(indices[nactive]))
 
@@ -362,12 +378,20 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
         end
         scale!(corr_eq_dir, x2)
 
-        gamma_ = C / AA
-        for i = 1:length(Cov)
-            p = (C - Cov[i]) / (AA - corr_eq_dir[i])
-            gamma_ = ifelse(p > 0 && p < gamma_, p, gamma_)
-            p = (C + Cov[i]) / (AA + corr_eq_dir[i])
-            gamma_ = ifelse(p > 0 && p < gamma_, p, gamma_)
+        γ_ = C / AA
+
+        if positive
+            for i = 1:length(Cov)
+                p = (C - Cov[i]) / (AA - corr_eq_dir[i])
+                γ_ = ifelse(p > 0 && p < γ_, p, γ_)
+            end
+        else
+            for i = 1:length(Cov)
+                p = (C - Cov[i]) / (AA - corr_eq_dir[i])
+                γ_ = ifelse(p > 0 && p < γ_, p, γ_)
+                p = (C + Cov[i]) / (AA + corr_eq_dir[i])
+                γ_ = ifelse(p > 0 && p < γ_, p, γ_)
+            end
         end
 
         drop = false
@@ -378,7 +402,8 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
                 z_pos = z[i]
             end
         end
-        if z_pos < gamma_
+
+        if z_pos < γ_
             for i = length(z):-1:1
                 if z[i] == z_pos
                     push!(idx, i)
@@ -389,7 +414,7 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
             signactive[idx] = -signactive[idx]
 
             if method == :lasso
-                gamma_ = z_pos
+                γ_ = z_pos
             end
             drop = true
         end
@@ -408,7 +433,7 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
         copy!(prev_coef, coef)
         fill!(coef, zero(eltype(coef)))
         for i = 1:length(active)
-            c = prev_coef[active[i]] + gamma_ * least_squares[i]
+            c = prev_coef[active[i]] + γ_ * least_squares[i]
             coef[active[i]] = c
             coefs[active[i], niter] = c
         end
@@ -418,7 +443,7 @@ function lars{T<:BlasReal}(X::Matrix{T}, y::Vector{T}; method::Symbol=:lasso,
 
         # update correlations
         for i = 1:length(Cov)
-            Cov[i] -= gamma_ * corr_eq_dir[i]
+            Cov[i] -= γ_ * corr_eq_dir[i]
         end
 
         # See if any coefficient has changed sign
